@@ -1,0 +1,125 @@
+--SQL Queries and Steps Used					
+
+--1. Create table for import in SQL				
+
+	CREATE TABLE yellevate_invoices (				
+		country varchar,			
+		customer_id varchar,			
+		invoice_number numeric,			
+		invoice_date date,			
+		due_date date,			
+		invoice_amount numeric,			
+		disputed numeric,			
+		dispute_lost numeric,			
+		settled_date date,			
+		days_settled integer,			
+		days_late integer			
+	)				
+					
+					
+--2. Import Yellevate Invoices.csv in SQL 				
+					
+--3. Check table, yellevate_invoices				
+
+	--Verify table				
+	SELECT * FROM yellevate_invoices				
+					
+	--Check total number of rows				
+	SELECT COUNT(*) FROM yellevate_invoices				
+					
+	-- Check NULL VALUES				
+	SELECT * FROM yellevate_invoices				
+	WHERE NOT(yellevate_invoices IS NOT NULL)				
+					
+	-- Checking duplicates				
+	SELECT country, 				
+	    invoice_number, 				
+	    invoice_date,				
+	    invoice_amount				
+	FROM yellevate_invoices				
+	GROUP BY 1,2,3,4				
+	HAVING COUNT(*) > 1;				
+					
+	-- Check distinct data				
+	SELECT DISTINCT country				
+	FROM yellevate_invoices				
+					
+--4. 	Create View, yellevate_invoices_dataset				
+
+	CREATE OR REPLACE VIEW yellevate_invoices_dataset AS (				
+		SELECT country,			
+		customer_id,			
+		invoice_number,			
+		invoice_date,			
+		due_date,			
+		invoice_amount,			
+		settled_date,			
+		days_settled,			
+		days_late,			
+		(CASE 			
+			WHEN disputed = 1 THEN 'Yes'		
+			ELSE 'No'		
+		END			
+		) AS disputed_yes_no,			
+					
+		(CASE 			
+			WHEN dispute_lost = 0 THEN 'Won'		
+			ELSE 'Lost'		
+		END			
+		) AS disputed_won_lost,			
+					
+		(CASE 			
+			WHEN days_late >  0 THEN 'Yes'		
+			ELSE 'No'		
+		END			
+		) AS settled_late_yes_no,			
+					
+		(CASE 			
+			WHEN dispute_lost = 1 THEN invoice_amount		
+			ELSE 0		
+		END			
+		) AS amount_lost_usd,			
+					
+		ROUND(AVG(days_settled::numeric) OVER(),0) avg_days_settled, 			
+		ROUND(AVG(days_settled::numeric) OVER(PARTITION BY disputed),0) avg_days_settled_disputed,			
+		ROUND(AVG(days_late::numeric) OVER(),0) avg_days_to_settle,
+		TO_CHAR(
+			(SELECT 
+		    		SUM(CASE WHEN dispute_lost = 1 THEN invoice_amount ELSE 0 END) / SUM(invoice_amount) * 100
+		    		FROM yellevate_invoices
+			), 'fm0d00%'
+		) AS dispute_lost_percent		
+					
+		FROM yellevate_invoices			
+	)				
+					
+	/* select from VIEW				
+	SELECT * FROM yellevate_invoices_dataset				
+	*/				
+					
+--5. Load yellevate_invoices_dataset to .csv file				
+
+
+
+-- NOTES:DAG 4 correction incorporated already in above SQL #4
+
+--6. SQL Statements for each Data Analysis Goals: (NOTES from CMs-Refocus)
+	DAG 1:
+
+	SELECT ROUND(AVG(days_settled),0) AS ave_invoice_settlement FROM yellevate_invoices_dataset
+
+	DAG 2:
+
+	SELECT ROUND(AVG(days_settled),0) AS ave_dispute_settled FROM yellevate_invoices_dataset WHERE disputed_yes_no = 'Yes'
+
+	DAG 3:
+
+	SELECT TO_CHAR(SUM(CASE WHEN disputed_won_lost = 'Lost' then 1 end)::numeric / SUM(CASE WHEN disputed_yes_no = 'Yes' then 1 end)::numeric * 100, 'fm00d00%') AS dispute_lost_percent FROM yellevate_invoices_dataset
+
+	DAG 4:
+
+	SELECT TO_CHAR(SUM(amount_lost_usd) / SUM(invoice_amount) * 100, 'fm0d00%') AS dispute_lost_percent FROM yellevate_invoices_dataset
+
+	DAG 5:
+
+	SELECT country, SUM(amount_lost_usd) AS amount_lost_usd FROM yellevate_invoices_dataset GROUP BY country ORDER BY SUM(amount_lost_usd) DESC
